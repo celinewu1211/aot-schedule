@@ -38,14 +38,17 @@ const td = () => new Date().toISOString().split("T")[0];
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DN = ["一", "二", "三", "四", "五", "六", "日"];
 
+// 取得當週日期
 const weekOf = (b) => {
   const d = new Date(b); const m = new Date(d); m.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return Array.from({ length: 7 }, (_, i) => { const dd = new Date(m); dd.setDate(m.getDate() + i); return dd.toISOString().split("T")[0]; });
 };
 
+// 取得當月日期網格 (42天)
 const monthOf = (b) => {
   const d = new Date(b); const y = d.getFullYear(); const m = d.getMonth();
-  const firstDay = new Date(y, m, 1); firstDay.setDate(firstDay.getDate() - ((firstDay.getDay() + 6) % 7));
+  const firstDay = new Date(y, m, 1);
+  firstDay.setDate(firstDay.getDate() - ((firstDay.getDay() + 6) % 7));
   return Array.from({ length: 42 }, (_, i) => { const cur = new Date(firstDay); cur.setDate(cur.getDate() + i); return cur.toISOString().split("T")[0]; });
 };
 
@@ -117,18 +120,17 @@ export default function App() {
   const [data, setData] = useState(null);
   const [session, setSession] = useState(null);
   const [tab, setTab] = useState("schedule");
-  const [viewMode, setViewMode] = useState("week");
+  const [viewMode, setViewMode] = useState("week"); // week or month
   const [weekBase, setWeekBase] = useState(td());
   const [saveStatus, setSaveStatus] = useState("");
   const [modals, setModals] = useState({});
   const [editing, setEditing] = useState({});
   const [filterTech, setFilterTech] = useState("ALL");
-  const [searchCust, setSearchCust] = useState(""); 
+  const [searchCust, setSearchCust] = useState(""); // 客戶搜尋字串
 
-  // 拖曳狀態
+  // 拖曳狀態 (Native DnD)
   const [dragType, setDragType] = useState(null);
   const [dragItem, setDragItem] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null); 
 
   const ready = useRef(false);
 
@@ -154,53 +156,32 @@ export default function App() {
 
   const gridDates = viewMode === "week" ? weekOf(weekBase) : monthOf(weekBase);
   
-  // 排程檢視邏輯 (含 Order 排序)
+  // 排程檢視邏輯
   const tfd = (ds) => {
     let tasks = data.tasks || [];
     if (!isAdmin) tasks = tasks.filter(t => t.techId === session.techId);
     else if (filterTech !== "ALL") tasks = tasks.filter(t => t.techId === filterTech);
     return tasks.filter(t => t.date === ds).sort((a, b) => {
       if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
-      return (a.time || "23:59").localeCompare(b.time || "23:59"); 
+      return (a.time || "23:59").localeCompare(b.time || "23:59");
     });
   };
 
-  // 標記/取消完成 (包含自動通報)
-  const toggleDone = (task) => {
-    const isDone = !task.done;
-    upd("tasks", p => p.map(t => t.id === task.id ? { ...t, done: isDone } : t));
-    const custName = data.customers.find(c => c.id === task.customerId)?.name || "未知客戶";
-    addLog(`${isDone ? '✅ 完成了' : '🔄 取消完成'} [${custName}] 的行程`);
-  };
-
-  // 無縫拖曳：支援同日排序與跨日移動
-  const handleDropTaskToDay = (e, targetDate) => {
+  // 拖曳行程處理
+  const handleDropTask = (e, targetDate) => {
     e.preventDefault();
     if (dragType !== "TASK" || !dragItem) return;
     
-    upd("tasks", p => {
-      let arr = [...p];
-      const oldIdx = arr.findIndex(x => x.id === dragItem.id);
-      if (oldIdx === -1) return arr;
-
-      const temp = arr.splice(oldIdx, 1)[0];
-      temp.date = targetDate; // 無論同日跨日，都更新為目標日期
-
-      if (dragOverId && dragOverId !== dragItem.id) {
-        const targetIdx = arr.findIndex(x => x.id === dragOverId);
-        if (targetIdx > -1) arr.splice(targetIdx, 0, temp); // 插入到目標上方
-        else arr.push(temp);
-      } else {
-        arr.push(temp); // 若沒對準某個卡片，就放到該天最後
-      }
-
-      // 重新刷新目標日期內所有卡片的 order 權重
-      arr.filter(x => x.date === targetDate).forEach((x, i) => x.order = i);
-      return arr;
-    });
-
-    addLog(`調整了行程排期與順序`);
-    setDragType(null); setDragItem(null); setDragOverId(null);
+    if (dragItem.date !== targetDate) {
+      upd("tasks", p => p.map(t => t.id === dragItem.id ? { ...t, date: targetDate } : t));
+      addLog(`將行程移至 ${targetDate}`);
+    } else {
+      // 同日調順序 -> 直接給予最高 order (最簡單的同日下移)
+      // 若需要精細排序可搭配時間視窗
+      setEditing({ ...dragItem });
+      setModals({ adjustTime: true });
+    }
+    setDragType(null); setDragItem(null);
   };
 
   // 客戶匯入
@@ -225,10 +206,12 @@ export default function App() {
     r.readAsText(file);
   };
 
+  // 取得目前月份顯示名稱
   const currentMonthLabel = new Date(weekBase).toLocaleString('zh-TW', { year: 'numeric', month: 'long' });
 
   return (
     <div style={{ fontFamily: "'Noto Sans TC',sans-serif", background: "#f8fafc", minHeight: "100vh", paddingBottom: 50 }}>
+      {/* 狀態列 */}
       {saveStatus && (
         <div style={{ position: "fixed", bottom: 12, right: 12, zIndex: 2000, padding: "8px 14px", borderRadius: 8, fontSize: 12, background: "#fff", border: "1px solid #e2e8f0", boxShadow: "0 4px 10px rgba(0,0,0,0.1)" }}>
           {saveStatus === "saving" ? "🔄 同步中..." : saveStatus === "saved" ? "✅ 雲端已同步" : "❌ 同步失敗"}
@@ -291,6 +274,7 @@ export default function App() {
               </div>
             </div>
             
+            {/* 星期標頭 (月視圖用) */}
             {viewMode === "month" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 6 }}>
                 {DN.map(d => <div key={d} style={{ textAlign:"center", fontWeight:700, color:"#64748b", fontSize:13 }}>週{d}</div>)}
@@ -306,7 +290,7 @@ export default function App() {
                 return (
                   <div key={date} 
                        onDragOver={(e) => { e.preventDefault(); if (dragType === "TASK") e.dataTransfer.dropEffect = "move"; }} 
-                       onDrop={(e) => handleDropTaskToDay(e, date)}
+                       onDrop={(e) => handleDropTask(e, date)}
                        style={{ background: isToday ? "#f0f9ff" : (isCurrentMonth ? "#fff" : "#f8fafc"), borderRadius: 10, padding: 8, minHeight: viewMode==="week"?300:120, border: isToday ? "2px solid #38bdf8" : "1px solid #e2e8f0", opacity: isCurrentMonth?1:0.5 }}>
                     <div onClick={() => { if(isAdmin) { setEditing({ prefillDate: date, time:"" }); setModals({ task: true }); setSearchCust(""); } }} 
                          style={{ textAlign: "center", borderBottom: isToday ? "1px solid #bae6fd" : "1px solid #f1f5f9", paddingBottom: 6, marginBottom: 8, cursor: isAdmin ? "pointer" : "default" }}>
@@ -320,54 +304,29 @@ export default function App() {
                         const tech = data.technicians.find(tc => tc.id === t.techId) || {};
                         const isDraggable = isAdmin || t.techId === session.techId;
                         
-                        // 卡片視覺設計 (已完成綠色 / 未完成白色)
-                        const cardBg = t.done ? "#f0fdf4" : (t.report ? "#f8fafc" : "#fff");
-                        const cardBorder = t.done ? "#bbf7d0" : "#cbd5e1";
-                        const cardLeftBorder = t.done ? "#22c55e" : "#3b82f6";
-
                         return (
                           <div key={t.id} 
                                draggable={isDraggable}
                                onDragStart={() => { setDragType("TASK"); setDragItem(t); }}
-                               onDragEnter={() => { if(dragType === "TASK") setDragOverId(t.id); }}
-                               style={{ padding: "8px", borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}`, borderLeft: `5px solid ${cardLeftBorder}`, cursor: isDraggable ? "grab" : "default", opacity: dragOverId === t.id ? 0.4 : 1, transition: "opacity 0.2s" }}>
+                               style={{ padding: "8px", borderRadius: 8, background: t.report ? "#f0fdf4" : "#fff", border: t.report ? "1px solid #bbf7d0" : "1px solid #cbd5e1", borderLeft: `4px solid ${t.report ? "#22c55e" : "#3b82f6"}`, cursor: isDraggable ? "grab" : "default" }}>
                             
-                            {/* 第一列：時間與技師/編輯按鈕 */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                              {t.time ? <span style={{ fontWeight: 800, color: "#1e293b", fontSize: 13 }}>{t.time}</span> : <span />}
-                              {isAdmin && (
-                                <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                                  <button onClick={() => { setEditing(t); setModals({ task: true }); setSearchCust(""); }} style={{ background:"none", border:"none", cursor:"pointer", padding:0, fontSize:12 }} title="編輯行程">✏️</button>
-                                  {viewMode === "week" && <span style={{ fontSize: 10, color: "#fff", background:"#64748b", padding:"2px 4px", borderRadius:4 }}>{tech.name}</span>}
-                                </div>
-                              )}
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                              <span style={{ fontWeight: 800, color: "#1e293b", fontSize: 13 }}>{t.time || "待確認"}</span>
+                              {isAdmin && viewMode === "week" && <span style={{ fontSize: 10, color: "#fff", background:"#64748b", padding:"2px 4px", borderRadius:4 }}>{tech.name}</span>}
                             </div>
                             
-                            {/* 客戶名稱 */}
-                            <div style={{ color: "#334155", fontWeight:700, fontSize: 13, textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.7 : 1 }}>{cust.name || "未知客戶"}</div>
+                            <div style={{ color: "#334155", fontWeight:700, fontSize: 12, whiteSpace: viewMode==="month"?"nowrap":"normal", overflow:"hidden", textOverflow:"ellipsis" }}>{cust.name || "未知客戶"}</div>
                             
-                            {/* 技師視角：聯絡人 */}
                             {!isAdmin && viewMode==="week" && cust.contact && (
                               <div style={{ fontSize: 11, color: "#475569", marginTop: 4, background:"#f1f5f9", padding:"4px", borderRadius:4 }}>
                                 👤 {cust.contact} <br/>📞 <a href={`tel:${cust.phone}`} style={{color:"#0ea5e9", textDecoration:"none", fontWeight:600}}>{cust.phone}</a>
                               </div>
                             )}
-
-                            {/* 回報提示 */}
-                            {t.report && viewMode==="week" && (
-                              <div style={{ fontSize: 11, color:"#64748b", marginTop: 4 }}>📝 有新備註</div>
-                            )}
                             
-                            {/* 技師操作按鈕 (標記完成/回報) */}
                             {t.techId === session.techId && viewMode==="week" && (
-                              <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-                                <button onClick={() => toggleDone(t)} style={{ flex: 1, background: t.done ? "#22c55e" : "#f1f5f9", color: t.done ? "#fff" : "#475569", border: "none", padding: "6px 0", borderRadius: 4, fontSize: 11, cursor: "pointer", fontWeight:700 }}>
-                                  {t.done ? "✅ 已完成 (點擊取消)" : "⬜ 標記完成"}
-                                </button>
-                                <button onClick={() => { setEditing(t); setModals({ report: true }); }} style={{ flex: 1, background: "#f8fafc", color: "#475569", border: "1px solid #cbd5e1", padding: "6px 0", borderRadius: 4, fontSize: 11, cursor: "pointer", fontWeight:600 }}>
-                                  📝 備註回報
-                                </button>
-                              </div>
+                              <button onClick={() => { setEditing(t); setModals({ report: true }); }} style={{ background: t.report ? "#22c55e" : "#f8fafc", color: t.report ? "#fff" : "#475569", border: t.report ? "none" : "1px solid #cbd5e1", width: "100%", padding: "4px", borderRadius: 4, marginTop: 6, fontSize: 11, cursor: "pointer", fontWeight:600 }}>
+                                {t.report ? "✓ 已回報" : "📝 狀態回報"}
+                              </button>
                             )}
                           </div>
                         );
@@ -394,11 +353,11 @@ export default function App() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left" }}>
                 <thead>
                   <tr style={{ background: "#f8fafc", color: "#475569" }}>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width:60 }}>狀態</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>狀態</th>
                     <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>編碼</th>
                     <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>客戶名稱</th>
                     <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>聯絡人資訊</th>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width: 80 }}>操作</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width: 120 }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -413,16 +372,16 @@ export default function App() {
                           arr.splice(dragItem, 1); arr.splice(i, 0, temp);
                           upd("customers", arr); setDragType(null); setDragItem(null);
                         }}
-                        style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.5 : 1, cursor:"grab" }}>
-                      <td style={{ padding: "12px 14px", textAlign:"center" }}>{c.active === false ? "🔴" : "🟢"}</td>
+                        style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.6 : 1 }}>
+                      <td style={{ padding: "12px 14px" }}>{c.active === false ? "🔴 停用" : "🟢 啟用"}</td>
                       <td style={{ padding: "12px 14px" }}>{c.code}</td>
                       <td style={{ padding: "12px 14px", fontWeight: 700, color: "#0f172a" }}>{c.name}</td>
                       <td style={{ padding: "12px 14px" }}>
                         <div>{c.contact} {c.phone && <a href={`tel:${c.phone}`} style={{color:"#0ea5e9", textDecoration:"none", fontWeight:600}}>📞 {c.phone}</a>}</div>
                         {c.email && <div style={{marginTop:4}}><a href={`mailto:${c.email}`} style={{color:"#f59e0b", textDecoration:"none", fontSize:12}}>✉️ Email</a></div>}
                       </td>
-                      <td style={{ padding: "12px 14px" }}>
-                        <button onClick={() => { setEditing(c); setModals({ custForm: true }); }} style={{ color: "#0ea5e9", background: "rgba(14,165,233,0.1)", padding:"6px 12px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>編輯</button>
+                      <td style={{ padding: "12px 14px", display:"flex", gap:5 }}>
+                        <button onClick={() => { setEditing(c); setModals({ custForm: true }); }} style={{ color: "#0ea5e9", background: "rgba(14,165,233,0.1)", padding:"6px 10px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>編輯</button>
                       </td>
                     </tr>
                   ))}
@@ -435,17 +394,17 @@ export default function App() {
 
       {/* --- Modals 區塊 --- */}
 
-      {/* 指派/編輯行程 */}
-      <Modal open={modals.task} onClose={() => setModals({})} title={editing.id ? "編輯排程" : "新增排程"}>
+      {/* 指派行程 */}
+      <Modal open={modals.task} onClose={() => setModals({})} title="設定排程">
         <div style={S.f}>
           <label style={S.l}>日期</label>
           <input type="date" style={S.i} value={editing.date || editing.prefillDate || ""} onChange={e => setEditing({...editing, date: e.target.value})} />
         </div>
         <div style={S.f}>
-          <label style={S.l}>選擇客戶 (可搜尋)</label>
-          <input type="text" placeholder="🔍 輸入名稱或編碼搜尋..." style={{...S.i, marginBottom: 8}} value={searchCust} onChange={e => setSearchCust(e.target.value)} />
+          <label style={S.l}>客戶 (可輸入名稱或編碼搜尋)</label>
+          <input type="text" placeholder="🔍 搜尋客戶..." style={{...S.i, marginBottom: 8}} value={searchCust} onChange={e => setSearchCust(e.target.value)} />
           <select style={S.i} value={editing.customerId || ""} onChange={e => setEditing({...editing, customerId: e.target.value})}>
-            <option value="">請從選單選擇客戶...</option>
+            <option value="">請選擇過濾後的客戶...</option>
             {data.customers
               .filter(c => c.active !== false && (c.name.includes(searchCust) || (c.code||"").includes(searchCust)))
               .map(c => <option key={c.id} value={c.id}>[{c.code}] {c.name}</option>)}
@@ -459,26 +418,18 @@ export default function App() {
           </select>
         </div>
         <div style={S.f}>
-          <label style={S.l}>約定時間 (非必填，空白將不顯示時間)</label>
+          <label style={S.l}>約定時間 (非必填，空白則顯示待確認)</label>
           <input type="time" style={S.i} value={editing.time || ""} onChange={e => setEditing({...editing, time: e.target.value})} />
         </div>
-        
-        {/* 若為編輯模式，管理員可直接刪除行程 */}
-        {editing.id && (
-          <div style={{ textAlign: "right", marginTop: 10, marginBottom: 10 }}>
-            <button onClick={() => { if(window.confirm("確定刪除此行程？")) { upd("tasks", p => p.filter(t => t.id !== editing.id)); addLog("刪除了行程"); setModals({}); } }} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:13 }}>🗑️ 刪除此行程</button>
-          </div>
-        )}
-
         <button onClick={() => {
           if (!editing.customerId || !editing.techId || (!editing.date && !editing.prefillDate)) return alert("日期、客戶與技師為必選");
           const theDate = editing.date || editing.prefillDate;
-          const newTask = { id: editing.id || uid(), date: theDate, time: editing.time || "", customerId: editing.customerId, techId: editing.techId, done: editing.done || false, report: editing.report || "", order: editing.order || Date.now() };
+          const newTask = { id: editing.id || uid(), date: theDate, time: editing.time || "", customerId: editing.customerId, techId: editing.techId };
           
-          if(editing.id) upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, ...newTask } : t));
-          else upd("tasks", p => [...(p || []), newTask]);
+          if(editing.id) upd("tasks", p => p.map(t => t.id === editing.id ? newTask : t)); // Update
+          else upd("tasks", p => [...(p || []), newTask]); // Add
           
-          addLog(`為 ${data.technicians.find(t=>t.id===editing.techId)?.name} ${editing.id ? '更新' : '排定'}了 ${theDate} 的行程`);
+          addLog(`為 ${data.technicians.find(t=>t.id===editing.techId)?.name} 排定了 ${theDate} 的行程`);
           setModals({});
         }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>確認儲存排程</button>
       </Modal>
@@ -494,9 +445,8 @@ export default function App() {
         </div>
         <div style={S.f}><label style={S.l}>Email</label><input style={S.i} value={editing.email || ""} onChange={e => setEditing({...editing, email: e.target.value})} /></div>
         <div style={S.f}>
-          <label style={{ fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontWeight:700, background:"#f1f5f9", padding:10, borderRadius:8 }}>
-            <input type="checkbox" checked={editing.active !== false} onChange={e => setEditing({...editing, active: e.target.checked})} style={{transform:"scale(1.2)"}} /> 
-            {editing.active !== false ? "🟢 啟用此客戶" : "🔴 停用此客戶 (將從排程選單隱藏)"}
+          <label style={{ fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight:600 }}>
+            <input type="checkbox" checked={editing.active !== false} onChange={e => setEditing({...editing, active: e.target.checked})} /> 🟢 啟用此客戶 (取消勾選將在排程選單中隱藏)
           </label>
         </div>
         <button onClick={() => {
@@ -504,24 +454,39 @@ export default function App() {
           const isExist = data.customers.find(c => c.id === editing.id);
           if (isExist) upd("customers", p => p.map(c => c.id === editing.id ? editing : c));
           else upd("customers", p => [editing, ...p]);
-          addLog(`手動更新了客戶資料: ${editing.name}`);
           setModals({});
         }} style={{ ...S.b("#10b981", "#fff"), width: "100%", padding: "12px" }}>儲存客戶資料</button>
       </Modal>
 
-      {/* 技師文字回報 Modal */}
-      <Modal open={modals.report} onClose={() => setModals({})} title="填寫狀態備註">
-        <div style={S.f}><label style={S.l}>現場備註 / 處理狀況</label><textarea rows={5} style={S.i} value={editing.report || ""} onChange={e => setEditing({...editing, report: e.target.value})} placeholder="例如：已完成保養，建議下次更換馬達..." /></div>
+      {/* 調整時間 Modal (同日拖曳) */}
+      <Modal open={modals.adjustTime} onClose={() => setModals({})} title="修改行程時間">
+        <p style={{ fontSize: 14, color: "#64748b", marginBottom: 20 }}>您調整了此行程順序，是否順便微調約定時間？(留空代表待確認)</p>
+        <div style={S.f}><label style={S.l}>新時間設定</label><input type="time" style={S.i} value={editing.time || ""} onChange={e => setEditing({...editing, time: e.target.value})} /></div>
+        <button onClick={() => {
+          upd("tasks", p => {
+            const arr = [...p];
+            const dragIdx = arr.findIndex(x => x.id === editing.id);
+            if (dragIdx > -1) { arr[dragIdx].time = editing.time || ""; arr[dragIdx].order = Date.now(); }
+            return arr;
+          });
+          addLog(`調整了行程時間與順序`);
+          setModals({});
+        }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding:"12px" }}>儲存變更</button>
+      </Modal>
+
+      {/* 技師回報 Modal */}
+      <Modal open={modals.report} onClose={() => setModals({})} title="狀態回報">
+        <div style={S.f}><label style={S.l}>現場備註 / 完成狀況</label><textarea rows={4} style={S.i} value={editing.report || ""} onChange={e => setEditing({...editing, report: e.target.value})} placeholder="例如：已完成保養..." /></div>
         <button onClick={() => {
           upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, report: editing.report } : t));
-          addLog(`回報了行程備註`);
+          addLog(`回報了行程進度`);
           setModals({});
-        }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>送出備註</button>
+        }} style={{ ...S.b("#22c55e", "#fff"), width: "100%", padding: "12px" }}>送出回報</button>
       </Modal>
 
       {/* 技師管理 Modal */}
       <Modal open={modals.tech} onClose={() => setModals({})} title="技師管理模組">
-         <p style={{ fontSize: 13, color:"#64748b", marginBottom:15 }}>* 提示：按住技師區塊可上下拖曳調整顯示排序。</p>
+         <p style={{ fontSize: 13, color:"#64748b", marginBottom:15 }}>* 提示：按住技師區塊可上下拖曳調整排序。</p>
          {data.technicians && data.technicians.map((t, idx) => (
            <div key={t.id} draggable onDragStart={() => { setDragType("TECH"); setDragItem(idx); }} onDragOver={(e) => e.preventDefault()} onDrop={() => {
                   if(dragType !== "TECH") return;
@@ -549,20 +514,20 @@ export default function App() {
 
       {/* 系統動態紀錄 Modal */}
       <Modal open={modals.logs} onClose={() => setModals({})} title="系統近期動態追蹤">
-        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 15 }}>
-          <button onClick={() => { if(window.confirm("確定要清空所有紀錄嗎？")) upd("logs", []); }} style={{...S.b("none", "#ef4444"), border:"1px solid #ef4444", padding:"6px 10px", fontSize:12}}>🗑️ 清除全部已讀紀錄</button>
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 10 }}>
+          <button onClick={() => { if(window.confirm("確定要清空所有紀錄嗎？")) upd("logs", []); }} style={{...S.b("none", "#ef4444"), border:"1px solid #ef4444", padding:"4px 8px", fontSize:11}}>🗑️ 清除全部紀錄</button>
         </div>
         <div style={{ maxHeight: 400, overflowY: "auto", paddingRight: 5 }}>
           {data.logs?.length > 0 ? data.logs.map(l => (
-            <div key={l.id} style={{ padding: "14px 12px", borderBottom: "1px solid #e2e8f0", fontSize: 14, display:"flex", gap:10 }}>
-              <div style={{ color: "#94a3b8", whiteSpace:"nowrap", fontSize:12 }}>{l.time}</div>
-              <div style={{ lineHeight:1.4 }}><b style={{color:"#0ea5e9"}}>{l.user}</b> {l.msg}</div>
+            <div key={l.id} style={{ padding: "12px", borderBottom: "1px solid #e2e8f0", fontSize: 13, display:"flex", gap:10 }}>
+              <div style={{ color: "#94a3b8", whiteSpace:"nowrap" }}>{l.time}</div>
+              <div><b style={{color:"#0ea5e9"}}>{l.user}</b> {l.msg}</div>
             </div>
-          )) : <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontSize:15 }}>✅ 目前尚無任何新動態</div>}
+          )) : <div style={{ textAlign:"center", padding:30, color:"#94a3b8" }}>尚無活動紀錄</div>}
         </div>
       </Modal>
 
-      {/* 系統設定 Modal */}
+      {/* 系統設定與備份 Modal */}
       <Modal open={modals.cfg} onClose={() => setModals({})} title="系統環境設定">
          <div style={S.f}><label style={S.l}>系統名稱</label><input style={S.i} value={data.appName} onChange={e => upd("appName", e.target.value)} /></div>
          <div style={S.f}><label style={S.l}>上傳公司 Logo</label><input type="file" accept="image/*" style={{...S.i, padding:"6px"}} onChange={e => { if (!e.target.files[0]) return; const r = new FileReader(); r.onload = ev => upd("logo", ev.target.result); r.readAsDataURL(e.target.files[0]); }} /></div>
