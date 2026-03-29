@@ -68,41 +68,40 @@ const S = {
 function Modal({ open, onClose, title, children, width = 500 }) {
   if (!open) return null;
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,15,30,.6)", backdropFilter: "blur(4px)" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: "24px", width: width, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,15,30,.6)", backdropFilter: "blur(4px)" }} onMouseDown={onClose}>
+      <div onMouseDown={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: "24px", width: width, maxWidth: "90vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", display:"flex", flexDirection:"column" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#94a3b8" }}>×</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#94a3b8", padding:0, lineHeight:1 }}>×</button>
         </div>
-        {children}
+        <div style={{ overflowY:"auto", flex:1 }}>{children}</div>
       </div>
     </div>
   );
 }
 
-// --- 登入模組 ---
+// --- 登入模組 (徹底修復 Lag 與 alert 問題) ---
 function Login({ techs = [], adminPin, appName, logo, onLogin }) {
   const [acc, setAcc] = useState(""); 
   const [pin, setPin] = useState(""); 
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   const tryLogin = () => {
     setErr("");
-    setTimeout(() => {
-      const inputAcc = acc.trim().toLowerCase();
-      if (inputAcc === "admin") {
-        if (pin === adminPin) onLogin({ role: "admin", name: "系統總管", isAdmin: true }); else setErr("密碼錯誤");
-        return;
-      }
-      const safeTechs = Array.isArray(techs) ? techs : [];
-      const t = safeTechs.find(x => x && x.name && x.name.toLowerCase() === inputAcc);
-      if (t) {
-        if (t.active === false) setErr("此帳號已停用，請聯繫管理員");
-        else if (t.pin === pin) onLogin({ role: t.isAdmin ? "admin" : "tech", techId: t.id, name: t.name, isAdmin: t.isAdmin });
-        else setErr("密碼錯誤");
-      } else setErr("找不到此帳號");
-    }, 50);
+    const inputAcc = acc.trim().toLowerCase();
+    if (inputAcc === "admin") {
+      if (pin === adminPin) onLogin({ role: "admin", name: "系統總管", isAdmin: true }); else setErr("密碼錯誤");
+      return;
+    }
+    const safeTechs = Array.isArray(techs) ? techs : [];
+    const t = safeTechs.find(x => x && x.name && x.name.toLowerCase() === inputAcc);
+    if (t) {
+      if (t.active === false) setErr("此帳號已停用，請聯繫管理員");
+      else if (t.pin === pin) onLogin({ role: t.isAdmin ? "admin" : "tech", techId: t.id, name: t.name, isAdmin: t.isAdmin });
+      else setErr("密碼錯誤");
+    } else setErr("找不到此帳號");
   };
 
   return (
@@ -125,8 +124,13 @@ function Login({ techs = [], adminPin, appName, logo, onLogin }) {
             </button>
           </div>
         </div>
-        {err && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 15, textAlign: "center", fontWeight: 700 }}>{err}</div>}
-        <button onClick={tryLogin} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px", fontSize: 16 }}>登入系統</button>
+        {err && <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 15, textAlign: "center", fontWeight: 700, background:"#fef2f2", padding:8, borderRadius:8 }}>{err}</div>}
+        <button onClick={tryLogin} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px", fontSize: 16, marginBottom: 15 }}>登入系統</button>
+        
+        <div style={{ textAlign: "center" }}>
+          <button onClick={() => setShowForgot(!showForgot)} style={{ background: "none", border: "none", color: "#64748b", fontSize: 13, textDecoration: "underline", cursor: "pointer" }}>忘記密碼？</button>
+          {showForgot && <div style={{ marginTop: 10, fontSize: 12, color: "#ef4444", background:"#f8fafc", padding:10, borderRadius:8 }}>請聯繫系統管理員，管理員可於後台直接為您重設密碼。</div>}
+        </div>
       </div>
     </div>
   );
@@ -142,9 +146,12 @@ function MainApp() {
   const [saveStatus, setSaveStatus] = useState("");
   const [modals, setModals] = useState({});
   const [editing, setEditing] = useState({});
+  const [activeTask, setActiveTask] = useState(null); // 當前查看詳細資訊的排程
+  
   const [filterTech, setFilterTech] = useState("ALL");
   const [searchCust, setSearchCust] = useState(""); 
   const [sortConfig, setSortConfig] = useState(null);
+  const [selectedCusts, setSelectedCusts] = useState([]); // 客戶多選
 
   const [dragType, setDragType] = useState(null);
   const [dragItem, setDragItem] = useState(null);
@@ -252,40 +259,66 @@ function MainApp() {
     upd("customers", sorted);
   };
 
-  const importCSV = (file) => {
-    if (!file) return;
-    const r = new FileReader();
-    r.onload = (e) => {
-      try {
-        const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
-        const mapped = res.data.map(r => ({
-          id: uid(), name: String(r["客戶名稱"] || "").trim(), code: String(r["客戶編碼"] || "").trim(),
-          address: String(r["地址"] || "").trim(), contact: String(r["聯絡人"] || "").trim(), phone: String(r["電話"] || "").trim(), email: String(r["Email"] || "").trim(), active: true
-        })).filter(c => c.name);
-        
-        const existSet = new Set(safeCusts.map(c => c ? String(c.name || "") + String(c.code || "") : ""));
-        const newCusts = mapped.filter(c => !existSet.has(c.name + c.code));
-        upd("customers", p => [...(p || []), ...newCusts]);
-        addLog(`匯入了 ${newCusts.length} 筆客戶資料`);
-        alert(`成功匯入 ${newCusts.length} 筆新客戶 (已略過重複)`);
-      } catch (err) { alert("匯入失敗，請確認 CSV 格式"); }
-    };
-    r.readAsText(file);
+  // 客戶多選功能
+  const toggleCustSelect = (id) => {
+    setSelectedCusts(p => p.includes(id) ? p.filter(x=>x!==id) : [...p, id]);
+  };
+  const toggleAllCusts = () => {
+    if(selectedCusts.length === safeCusts.length) setSelectedCusts([]);
+    else setSelectedCusts(safeCusts.map(c=>c.id));
+  };
+  const deleteSelectedCusts = () => {
+    if(selectedCusts.length === 0) return;
+    if(window.confirm(`確定要刪除這 ${selectedCusts.length} 筆客戶資料嗎？此動作不可逆！`)) {
+      upd("customers", p => p.filter(c => !selectedCusts.includes(c.id)));
+      setSelectedCusts([]);
+      addLog(`批次刪除了 ${selectedCusts.length} 筆客戶`);
+    }
   };
 
-  const restoreJSON = (file) => {
-    if (!file) return;
-    if (!window.confirm("⚠️ 警告：還原將會【覆蓋】目前系統所有資料！確定要繼續嗎？")) return;
-    const r = new FileReader();
-    r.onload = (e) => {
-      try { 
-        const d = JSON.parse(e.target.result); 
-        setData(d); 
-        alert("✅ 系統還原成功！"); 
-        addLog("執行了系統層級還原"); 
-      } catch { alert("還原失敗，檔案格式不正確"); }
-    };
-    r.readAsText(file);
+  // 渲染排程卡片
+  const renderTaskCard = (t, view) => {
+    if (!t) return null;
+    const cust = safeCusts.find(c => c && c.id === t.customerId) || {};
+    const tech = safeTechs.find(tc => tc && tc.id === t.techId) || {};
+    const tag = safeServices.find(s => s.id === t.serviceId) || safeServices[0];
+    const isDraggable = isAdmin || t.techId === session.techId;
+    
+    const cardBg = t.done ? "#f0fdf4" : (t.report ? "#f8fafc" : "#fff");
+    const cardBorder = t.done ? "#bbf7d0" : "#cbd5e1";
+    const cardLeftBorder = t.done ? "#22c55e" : (tag?.color || "#3b82f6");
+
+    return (
+      <div key={t.id} 
+           draggable={isDraggable}
+           onDragStart={() => { setDragType("TASK"); setDragItem(t); }}
+           onDragEnter={() => { if(dragType === "TASK") setDragOverId(t.id); }}
+           onClick={(e) => { e.stopPropagation(); setActiveTask(t); setModals({ taskDetail: true }); }}
+           style={{ padding: "8px", borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}`, borderLeft: `5px solid ${cardLeftBorder}`, cursor: "pointer", opacity: dragOverId === t.id ? 0.4 : 1, transition: "all 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+        
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          {t.time ? <span style={{ fontWeight: 800, color: "#1e293b", fontSize: 13 }}>{t.time}</span> : <span style={{fontSize:12, color:"#94a3b8"}}>待確認</span>}
+          {isAdmin && (
+            <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+              {view === "month" ? 
+                <span style={{ fontSize: 11, color: "#475569", fontWeight:800 }}>👷‍♂️ {tech.name || "未知"}</span> : 
+                <span style={{ fontSize: 10, color: "#fff", background:"#64748b", padding:"2px 4px", borderRadius:4 }}>{tech.name || "未知"}</span>
+              }
+            </div>
+          )}
+        </div>
+        
+        {tag && view !== "month" && <div style={{fontSize:10, color:tag.color, background:tag.bg, padding:"2px 6px", borderRadius:4, display:"inline-block", marginBottom:4, fontWeight:700}}>{tag.label}</div>}
+        
+        <div style={{ color: "#334155", fontWeight:700, fontSize: 13, textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.7 : 1 }}>
+          {cust.name || "未知客戶"} {cust.active === false && <span style={{color:"#ef4444", fontSize:11}}>(停用)</span>}
+        </div>
+        
+        {t.report && view !== "month" && <div style={{ fontSize: 11, color:"#64748b", marginTop: 4 }}>📝 有備註</div>}
+        
+        <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6, textAlign:"right" }}>👆 點擊查看詳情</div>
+      </div>
+    );
   };
 
   const currentMonthLabel = new Date(weekBase).toLocaleString('zh-TW', { year: 'numeric', month: 'long' });
@@ -323,9 +356,9 @@ function MainApp() {
             <div style={{ display: "flex", gap: 10 }}>
               <select style={{...S.i, width: "auto", padding: "8px 12px", background:"#fff"}} value={filterTech} onChange={e => setFilterTech(e.target.value)}>
                 <option value="ALL">👀 查看所有人行程</option>
-                {safeTechs.map(t => t ? <option key={t.id} value={t.id}>{t.name}</option> : null)}
+                {safeTechs.map(t => t ? <option key={t.id} value={t.id}>{t.name} {t.active===false?"(停用)":""}</option> : null)}
               </select>
-              <button onClick={() => { setEditing({ date: td(), time: "", serviceId: "mt", repeat: "none", repeatCount: 6 }); setModals({ task: true }); setSearchCust(""); }} style={S.b("#10b981", "#fff")}>➕ 手動新增排程</button>
+              <button onClick={() => { setEditing({ date: td(), time: "", serviceId: "mt", repeat: "none", repeatCount: 6 }); setModals({ taskForm: true }); setSearchCust(""); }} style={S.b("#10b981", "#fff")}>➕ 手動新增排程</button>
             </div>
           )}
         </div>
@@ -335,6 +368,7 @@ function MainApp() {
           {isAdmin && <button onClick={() => setTab("customers")} style={{ padding: "10px 5px", background: "none", border: "none", fontSize: 16, fontWeight: tab === "customers" ? 800 : 500, color: tab === "customers" ? "#0ea5e9" : "#64748b", borderBottom: tab === "customers" ? "3px solid #0ea5e9" : "3px solid transparent", cursor: "pointer" }}>👥 客戶管理</button>}
         </div>
 
+        {/* --- 排程視圖 --- */}
         {tab === "schedule" && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 15, alignItems: "center", background:"#fff", padding:"12px 20px", borderRadius:12, border:"1px solid #e2e8f0" }}>
@@ -371,7 +405,7 @@ function MainApp() {
                        style={{ background: isToday ? "#f0f9ff" : (isCurrentMonth ? "#fff" : "#f8fafc"), borderRadius: 10, padding: 8, minHeight: viewMode==="week"?300:120, border: isToday ? "2px solid #38bdf8" : "1px solid #e2e8f0", opacity: isCurrentMonth?1:0.5 }}>
                     <div onClick={() => { 
                            if(viewMode === "month") { setModals({ dayView: date }); }
-                           else if(isAdmin) { setEditing({ prefillDate: date, time:"", serviceId: "mt", repeat: "none", repeatCount: 6 }); setModals({ task: true }); setSearchCust(""); }
+                           else if(isAdmin) { setEditing({ prefillDate: date, time:"", serviceId: "mt", repeat: "none", repeatCount: 6 }); setModals({ taskForm: true }); setSearchCust(""); }
                          }} 
                          style={{ textAlign: "center", borderBottom: isToday ? "1px solid #bae6fd" : "1px solid #f1f5f9", paddingBottom: 6, marginBottom: 8, cursor: "pointer" }}
                          title={viewMode === "month" ? "點擊放大查看當日" : "點擊新增行程"}>
@@ -382,69 +416,7 @@ function MainApp() {
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: viewMode==="month"?80:"none", overflowY:"auto" }}>
-                      {dayTasks.map(t => {
-                        if (!t) return null;
-                        const cust = safeCusts.find(c => c && c.id === t.customerId) || {};
-                        const tech = safeTechs.find(tc => tc && tc.id === t.techId) || {};
-                        const tag = safeServices.find(s => s.id === t.serviceId) || safeServices[0];
-                        const isDraggable = isAdmin || t.techId === session.techId;
-                        
-                        const cardBg = t.done ? "#f0fdf4" : (t.report ? "#f8fafc" : "#fff");
-                        const cardBorder = t.done ? "#bbf7d0" : "#cbd5e1";
-                        const cardLeftBorder = t.done ? "#22c55e" : (tag?.color || "#3b82f6");
-
-                        return (
-                          <div key={t.id} 
-                               draggable={isDraggable}
-                               onDragStart={() => { setDragType("TASK"); setDragItem(t); }}
-                               onDragEnter={() => { if(dragType === "TASK") setDragOverId(t.id); }}
-                               style={{ padding: "8px", borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}`, borderLeft: `5px solid ${cardLeftBorder}`, cursor: isDraggable ? "grab" : "default", opacity: dragOverId === t.id ? 0.4 : 1, transition: "opacity 0.2s" }}>
-                            
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                              {t.time ? <span style={{ fontWeight: 800, color: "#1e293b", fontSize: 13 }}>{t.time}</span> : <span />}
-                              {isAdmin && (
-                                <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                                  {viewMode === "week" && <button onClick={() => { setEditing({...t, repeat:"none"}); setModals({ task: true }); setSearchCust(""); }} style={{ background:"none", border:"none", cursor:"pointer", padding:0, fontSize:12 }} title="編輯行程">✏️</button>}
-                                  {viewMode === "month" ? 
-                                    <span style={{ fontSize: 11, color: "#475569", fontWeight:800 }}>👷‍♂️ {tech.name || "未知"}</span> : 
-                                    <span style={{ fontSize: 10, color: "#fff", background:"#64748b", padding:"2px 4px", borderRadius:4 }}>{tech.name || "未知"}</span>
-                                  }
-                                </div>
-                              )}
-                            </div>
-                            
-                            {tag && viewMode==="week" && <div style={{fontSize:10, color:tag.color, background:tag.bg, padding:"2px 6px", borderRadius:4, display:"inline-block", marginBottom:4, fontWeight:700}}>{tag.label}</div>}
-                            
-                            <div style={{ color: "#334155", fontWeight:700, fontSize: 13, textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.7 : 1 }}>
-                              {cust.name || "未知客戶"}
-                              {cust.active === false && <span style={{color:"#ef4444", fontSize:11, marginLeft:4}}>(🔴已停用)</span>}
-                            </div>
-                            
-                            {!isAdmin && viewMode==="week" && cust.contact && (
-                              <div style={{ fontSize: 11, color: "#475569", marginTop: 4, background:"#f1f5f9", padding:"4px", borderRadius:4 }}>
-                                👤 {cust.contact} <br/>📞 <a href={`tel:${cust.phone}`} style={{color:"#0ea5e9", textDecoration:"none", fontWeight:600}}>{cust.phone}</a>
-                                <br/>💬 <a href={`https://wa.me/${cust.phone}`} target="_blank" rel="noreferrer" style={{color:"#22c55e", textDecoration:"none", fontWeight:600}}>WhatsApp</a>
-                                {cust.address && <><br/>📍 <a href={`https://google.com/maps/search/?api=1&query=$${cust.address}`} target="_blank" rel="noreferrer" style={{color:"#64748b", textDecoration:"none"}}>{cust.address}</a></>}
-                              </div>
-                            )}
-
-                            {t.report && viewMode==="week" && (
-                              <div style={{ fontSize: 11, color:"#64748b", marginTop: 4 }}>📝 有新備註</div>
-                            )}
-                            
-                            {t.techId === session.techId && viewMode==="week" && (
-                              <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-                                <button onClick={() => toggleDone(t)} style={{ flex: 1, background: t.done ? "#22c55e" : "#f1f5f9", color: t.done ? "#fff" : "#475569", border: "none", padding: "6px 0", borderRadius: 4, fontSize: 11, cursor: "pointer", fontWeight:700 }}>
-                                  {t.done ? "✅ 已完成" : "⬜ 標記完成"}
-                                </button>
-                                <button onClick={() => { setEditing(t); setModals({ report: true }); }} style={{ flex: 1, background: "#f8fafc", color: "#475569", border: "1px solid #cbd5e1", padding: "6px 0", borderRadius: 4, fontSize: 11, cursor: "pointer", fontWeight:600 }}>
-                                  📝 備註
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {dayTasks.map(t => renderTaskCard(t, viewMode))}
                     </div>
                   </div>
                 );
@@ -459,19 +431,22 @@ function MainApp() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
               <h3 style={{ margin: 0, fontSize:18 }}>客戶名單 ({safeCusts.length})</h3>
               <div style={{ display: "flex", gap: 10 }}>
-                <button onClick={() => { setEditing({ active: true, id: uid() }); setModals({ custForm: true }); }} style={S.b("#10b981", "#fff")}>➕ 手動新增客戶</button>
-                <label style={{ ...S.b("#0ea5e9", "#fff"), cursor: "pointer" }}> 📂 匯入 CSV <input type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => importCSV(e.target.files[0])} /></label>
+                {selectedCusts.length > 0 && <button onClick={deleteSelectedCusts} style={{...S.b("#ef4444", "#fff")}}>🗑️ 刪除已選 ({selectedCusts.length})</button>}
+                <button onClick={() => { setEditing({ active: true, id: uid() }); setModals({ custForm: true }); }} style={S.b("#10b981", "#fff")}>➕ 新增客戶</button>
               </div>
             </div>
             <div style={{ background: "#fff", borderRadius: 10, overflow: "hidden", border: "1px solid #e2e8f0" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14, textAlign: "left" }}>
                 <thead>
-                  <tr style={{ background: "#f8fafc", color: "#475569", cursor:"pointer", userSelect:"none" }}>
+                  <tr style={{ background: "#f8fafc", color: "#475569", userSelect:"none" }}>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width:40, textAlign:"center" }}>
+                      <input type="checkbox" checked={selectedCusts.length === safeCusts.length && safeCusts.length>0} onChange={toggleAllCusts} style={{cursor:"pointer", transform:"scale(1.2)"}}/>
+                    </th>
                     <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width:60 }}>狀態</th>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }} onClick={() => handleSortCustomer('code')}>編碼 ↕</th>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }} onClick={() => handleSortCustomer('name')}>客戶名稱 ↕</th>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>聯絡人 / 快速連結</th>
-                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width: 130 }}>操作</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", cursor:"pointer" }} onClick={() => handleSortCustomer('code')}>編碼 ↕</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", cursor:"pointer" }} onClick={() => handleSortCustomer('name')}>客戶名稱 ↕</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0" }}>聯絡資訊 (現場聯絡人/電話/WA)</th>
+                    <th style={{ padding: "14px", borderBottom:"2px solid #e2e8f0", width: 80 }}>操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -488,23 +463,22 @@ function MainApp() {
                             arr.splice(dragItem, 1); arr.splice(i, 0, temp);
                             upd("customers", arr); setDragType(null); setDragItem(null);
                           }}
-                          style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.6 : 1, cursor:"grab" }}>
-                        <td style={{ padding: "12px 14px", textAlign:"center" }}>{c.active === false ? "🔴" : "🟢"}</td>
-                        <td style={{ padding: "12px 14px" }}>{c.code}</td>
-                        <td style={{ padding: "12px 14px", fontWeight: 700, color: "#0f172a" }}>
-                          {c.name}
-                          {c.address && <div style={{fontSize:12, marginTop:4}}><a href={`https://google.com/maps/search/?api=1&query=$${c.address}`} target="_blank" rel="noreferrer" style={{color:"#64748b", textDecoration:"none"}}>📍 {c.address}</a></div>}
+                          style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.6 : 1 }}>
+                        <td style={{ padding: "12px 14px", textAlign:"center" }}>
+                          <input type="checkbox" checked={selectedCusts.includes(c.id)} onChange={() => toggleCustSelect(c.id)} style={{cursor:"pointer", transform:"scale(1.2)"}}/>
                         </td>
+                        <td style={{ padding: "12px 14px", textAlign:"center", cursor:"grab" }}>{c.active === false ? "🔴" : "🟢"}</td>
+                        <td style={{ padding: "12px 14px", cursor:"grab" }}>{c.code}</td>
+                        <td style={{ padding: "12px 14px", fontWeight: 700, color: "#0f172a", cursor:"grab" }}>{c.name}</td>
                         <td style={{ padding: "12px 14px" }}>
-                          <div>{c.contact} {c.phone && <a href={`tel:${c.phone}`} style={{color:"#0ea5e9", textDecoration:"none", fontWeight:600}}>📞 {c.phone}</a>}</div>
-                          <div style={{marginTop:4, display:"flex", gap:8}}>
-                            {c.phone && <a href={`https://wa.me/${c.phone}`} target="_blank" rel="noreferrer" style={{color:"#22c55e", textDecoration:"none", fontSize:12}}>💬 WhatsApp</a>}
-                            {c.email && <a href={`mailto:${c.email}`} style={{color:"#f59e0b", textDecoration:"none", fontSize:12}}>✉️ Email</a>}
+                          <div style={{display:"flex", gap:10, alignItems:"center", flexWrap:"wrap"}}>
+                            {c.contact && <span>👤 {c.contact}</span>}
+                            {c.phone && <a href={`tel:${c.phone}`} style={{color:"#0ea5e9", textDecoration:"none", fontWeight:600, background:"#f0f9ff", padding:"2px 6px", borderRadius:4}}>📞 {c.phone}</a>}
+                            {c.phone && <a href={`https://wa.me/${c.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:"#22c55e", textDecoration:"none", fontSize:12, background:"#f0fdf4", padding:"2px 6px", borderRadius:4}}>💬 WA</a>}
                           </div>
                         </td>
-                        <td style={{ padding: "12px 14px", display:"flex", gap:5 }}>
-                          <button onClick={() => { setEditing({...c, _prevActive: c.active}); setModals({ custForm: true }); }} style={{ color: "#0ea5e9", background: "rgba(14,165,233,0.1)", padding:"6px 10px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>編輯</button>
-                          <button onClick={() => { if(window.confirm("確定徹底刪除此客戶嗎？此動作不可逆！")) upd("customers", p => p.filter(x => x.id !== c.id)) }} style={{ color: "#ef4444", background: "rgba(239,68,68,0.1)", padding:"6px 10px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>刪除</button>
+                        <td style={{ padding: "12px 14px" }}>
+                          <button onClick={() => { setEditing({...c, _prevActive: c.active}); setModals({ custForm: true }); }} style={{ color: "#0ea5e9", background: "rgba(14,165,233,0.1)", padding:"6px 12px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>編輯</button>
                         </td>
                       </tr>
                     );
@@ -516,167 +490,188 @@ function MainApp() {
         )}
       </div>
 
-      {/* --- Modals --- */}
+      {/* --- Modals 彈窗區 --- */}
+      
+      {/* 🚀 詳細資訊卡 (Task Detail) */}
+      <Modal open={modals.taskDetail} onClose={() => {setModals({}); setActiveTask(null);}} title="📋 行程詳細資訊" width={550}>
+        {activeTask && (() => {
+          const cust = safeCusts.find(c => c && c.id === activeTask.customerId) || {};
+          const tech = safeTechs.find(tc => tc && tc.id === activeTask.techId) || {};
+          const tag = safeServices.find(s => s.id === activeTask.serviceId) || safeServices[0];
+          const isMyTask = isAdmin || activeTask.techId === session.techId;
+          
+          return (
+            <div style={{display:"flex", flexDirection:"column", gap:15}}>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", background:"#f8fafc", padding:"12px 16px", borderRadius:8, border:`1px solid #e2e8f0`, borderLeft:`5px solid ${tag?.color || "#3b82f6"}`}}>
+                <div>
+                  <div style={{fontSize:13, color:"#64748b", marginBottom:4}}>排定日期：{activeTask.date}</div>
+                  <div style={{fontSize:20, fontWeight:900, color:"#0f172a"}}>{activeTask.time || "待確認 / 全天"}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <span style={{fontSize:12, color:tag?.color, background:tag?.bg, padding:"4px 8px", borderRadius:6, fontWeight:700}}>{tag?.label}</span>
+                  <div style={{fontSize:13, fontWeight:800, color:"#0ea5e9", marginTop:8}}>👷‍♂️ 負責技師：{tech.name || "未知"}</div>
+                </div>
+              </div>
+
+              <div style={{border:"1px solid #e2e8f0", borderRadius:8, padding:16}}>
+                <h4 style={{margin:"0 0 12px 0", color:"#1e293b", fontSize:18}}>{cust.name || "未知客戶"}</h4>
+                <div style={{display:"grid", gap:12, fontSize:14}}>
+                  {cust.address && (
+                    <div style={{display:"flex", gap:8, alignItems:"flex-start"}}>
+                      <span style={{color:"#64748b"}}>📍 地址：</span>
+                      <div style={{flex:1}}>
+                        {cust.address} 
+                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(cust.address)}`} target="_blank" rel="noreferrer" style={{marginLeft:8, color:"#3b82f6", textDecoration:"none", fontWeight:600, background:"#eff6ff", padding:"2px 8px", borderRadius:4, fontSize:12, display:"inline-block"}}>開啟導航</a>
+                      </div>
+                    </div>
+                  )}
+                  {cust.contact && <div style={{display:"flex", gap:8}}><span style={{color:"#64748b"}}>👤 現場聯絡人：</span><span style={{fontWeight:600}}>{cust.contact}</span></div>}
+                  {cust.phone && (
+                    <div style={{display:"flex", gap:8, alignItems:"center"}}>
+                      <span style={{color:"#64748b"}}>📞 電話：</span>
+                      <span style={{fontWeight:600}}>{cust.phone}</span>
+                      <a href={`tel:${cust.phone}`} style={{color:"#fff", background:"#0ea5e9", textDecoration:"none", padding:"4px 10px", borderRadius:6, fontSize:12, fontWeight:600, marginLeft:4}}>撥打</a>
+                      <a href={`https://wa.me/${cust.phone.replace(/\D/g,'')}`} target="_blank" rel="noreferrer" style={{color:"#fff", background:"#22c55e", textDecoration:"none", padding:"4px 10px", borderRadius:6, fontSize:12, fontWeight:600}}>WhatsApp</a>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 技師操作區 */}
+              {isMyTask && (
+                <div style={{background:"#f1f5f9", borderRadius:8, padding:16, marginTop:10}}>
+                  <label style={S.l}>📝 狀態與備註回報</label>
+                  <textarea rows={3} style={{...S.i, marginBottom:10}} value={activeTask.report || ""} onChange={e => setActiveTask({...activeTask, report: e.target.value})} placeholder="請填寫現場處理狀況或建議..." />
+                  
+                  <div style={{display:"flex", gap:10}}>
+                    <button onClick={() => {
+                      upd("tasks", p => p.map(t => t.id === activeTask.id ? { ...t, report: activeTask.report } : t));
+                      addLog(`更新了行程備註`);
+                      alert("備註已儲存！");
+                    }} style={{...S.b("#0ea5e9", "#fff"), flex:1}}>💾 儲存備註</button>
+                    
+                    <button onClick={() => {
+                      const isDone = !activeTask.done;
+                      upd("tasks", p => p.map(t => t.id === activeTask.id ? { ...t, done: isDone, report: activeTask.report } : t));
+                      setActiveTask({...activeTask, done: isDone});
+                      addLog(`${isDone ? '✅ 完成了' : '🔄 取消完成'} [${cust.name}] 的行程`);
+                    }} style={{...S.b(activeTask.done ? "#22c55e" : "#fff", activeTask.done ? "#fff" : "#475569"), flex:1, border: activeTask.done ? "none" : "1px solid #cbd5e1"}}>
+                      {activeTask.done ? "✅ 已完成 (點擊可取消)" : "⬜ 標記為完成"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && (
+                <div style={{textAlign:"right", marginTop:10}}>
+                  <button onClick={() => { setEditing({...activeTask, repeat:"none"}); setModals({ taskForm: true }); }} style={{background:"none", border:"none", color:"#0ea5e9", cursor:"pointer", fontWeight:600, marginRight:15}}>✏️ 編輯排程設定</button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* 日視圖 Modal (月視圖點擊數字) */}
       <Modal open={modals.dayView} onClose={() => setModals({})} title={`🔍 ${modals.dayView} 詳細行程`} width={600}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {tfd(modals.dayView).length === 0 ? <div style={{textAlign:"center", color:"#64748b", padding:20}}>這天沒有排程喔！</div> : 
-           tfd(modals.dayView).map(t => {
-             const cust = safeCusts.find(c => c && c.id === t.customerId) || {};
-             const tech = safeTechs.find(tc => tc && tc.id === t.techId) || {};
-             const tag = safeServices.find(s => s.id === t.serviceId) || safeServices[0];
-             return (
-               <div key={t.id} style={{ padding: 12, borderRadius: 8, border: "1px solid #e2e8f0", borderLeft: `5px solid ${tag?.color || "#3b82f6"}`, background: "#f8fafc", display:"flex", justifyContent:"space-between" }}>
-                 <div>
-                   <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:4}}>
-                     <span style={{fontWeight:800, fontSize:15}}>{t.time || "待確認"}</span>
-                     <span style={{fontSize:11, color:tag?.color, background:tag?.bg, padding:"2px 6px", borderRadius:4}}>{tag?.label}</span>
-                   </div>
-                   <div style={{fontWeight:700, fontSize:15, color:"#0f172a"}}>
-                     {cust.name} {cust.active === false && <span style={{color:"#ef4444", fontSize:12}}>(停用)</span>}
-                   </div>
-                   {cust.contact && <div style={{fontSize:12, color:"#475569", marginTop:4}}>👤 {cust.contact} 📞 {cust.phone}</div>}
-                   {t.report && <div style={{fontSize:12, color:"#22c55e", marginTop:4}}>📝 備註: {t.report}</div>}
-                 </div>
-                 <div style={{textAlign:"right"}}>
-                   <div style={{fontSize:13, fontWeight:800, color:"#0ea5e9", background:"#e0f2fe", padding:"4px 8px", borderRadius:6}}>👷‍♂️ {tech.name}</div>
-                   <div style={{marginTop:8, fontSize:12, color: t.done ? "#22c55e" : "#64748b", fontWeight:700}}>{t.done ? "✅ 已完成" : "未完成"}</div>
-                 </div>
-               </div>
-             );
-           })
+           tfd(modals.dayView).map(t => renderTaskCard(t, "day"))
           }
         </div>
       </Modal>
 
-      {/* 指派/編輯行程 (加入循環排程) */}
-      <Modal open={modals.task} onClose={() => setModals({})} title={editing.id ? "編輯排程" : "新增排程"}>
-        <div style={S.f}>
-          <label style={S.l}>日期</label>
-          <input type="date" style={S.i} value={editing.date || editing.prefillDate || ""} onChange={e => setEditing({...editing, date: e.target.value})} />
-        </div>
+      {/* 指派/編輯行程表單 */}
+      <Modal open={modals.taskForm} onClose={() => setModals({})} title={editing.id ? "編輯排程設定" : "新增排程"}>
+        <div style={S.f}><label style={S.l}>日期</label><input type="date" style={S.i} value={editing.date || editing.prefillDate || ""} onChange={e => setEditing({...editing, date: e.target.value})} /></div>
         <div style={S.f}>
           <label style={S.l}>服務類型</label>
           <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
             {safeServices.map(s => (
-              <button key={s.id} onClick={() => setEditing({...editing, serviceId: s.id})} style={{ padding:"6px 12px", borderRadius:20, border:`1px solid ${s.color}`, background: editing.serviceId === s.id ? s.color : "#fff", color: editing.serviceId === s.id ? "#fff" : s.color, cursor:"pointer", fontWeight:600, fontSize:12 }}>
-                {s.label}
-              </button>
+              <button key={s.id} onClick={() => setEditing({...editing, serviceId: s.id})} style={{ padding:"6px 12px", borderRadius:20, border:`1px solid ${s.color}`, background: editing.serviceId === s.id ? s.color : "#fff", color: editing.serviceId === s.id ? "#fff" : s.color, cursor:"pointer", fontWeight:600, fontSize:12 }}>{s.label}</button>
             ))}
           </div>
         </div>
         <div style={S.f}>
-          <label style={S.l}>選擇客戶 (過濾搜尋)</label>
-          <input type="text" placeholder="🔍 快速搜尋名稱或編碼..." style={{...S.i, marginBottom: 8}} value={searchCust} onChange={e => setSearchCust(e.target.value)} />
+          <label style={S.l}>選擇客戶 (可輸入名稱或編碼過濾)</label>
+          <input type="text" placeholder="🔍 快速搜尋..." style={{...S.i, marginBottom: 8}} value={searchCust} onChange={e => setSearchCust(e.target.value)} />
           <select style={S.i} value={editing.customerId || ""} onChange={e => setEditing({...editing, customerId: e.target.value})}>
-            <option value="">請從選單選擇符合的客戶...</option>
-            {safeCusts
-              .filter(c => c && c.active !== false && (String(c.name||"").toLowerCase().includes(safeSearch) || String(c.code||"").toLowerCase().includes(safeSearch)))
-              .map(c => <option key={c.id} value={c.id}>[{c.code}] {c.name}</option>)}
+            <option value="">請從下方選單選擇...</option>
+            {safeCusts.filter(c => c && c.active !== false && (String(c.name||"").toLowerCase().includes(safeSearch) || String(c.code||"").toLowerCase().includes(safeSearch))).map(c => <option key={c.id} value={c.id}>[{c.code}] {c.name}</option>)}
           </select>
         </div>
-        <div style={S.f}>
-          <label style={S.l}>指派技師</label>
-          <select style={S.i} value={editing.techId || ""} onChange={e => setEditing({...editing, techId: e.target.value})}>
-            <option value="">請選擇技師...</option>
-            {safeTechs.filter(t=>t&&t.active).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-        </div>
-        <div style={S.f}>
-          <label style={S.l}>約定時間 (非必填)</label>
-          <input type="time" style={S.i} value={editing.time || ""} onChange={e => setEditing({...editing, time: e.target.value})} />
-        </div>
+        <div style={S.f}><label style={S.l}>指派技師</label><select style={S.i} value={editing.techId || ""} onChange={e => setEditing({...editing, techId: e.target.value})}><option value="">請選擇...</option>{safeTechs.filter(t=>t&&t.active).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+        <div style={S.f}><label style={S.l}>約定時間 (可留空)</label><input type="time" style={S.i} value={editing.time || ""} onChange={e => setEditing({...editing, time: e.target.value})} /></div>
         
-        {/* 定期排程選項 (僅新增時顯示) */}
         {!editing.id && (
           <div style={{ background: "#f0f9ff", padding: 15, borderRadius: 8, marginBottom: 15, border: "1px solid #bae6fd" }}>
             <label style={S.l}>🔄 循環定期排程</label>
             <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
               {["none", "weekly", "biweekly", "monthly"].map(opt => {
-                const labels = { none: "單次不循環", weekly: "每週", biweekly: "每雙週", monthly: "每月" };
-                return (
-                  <label key={opt} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                    <input type="radio" checked={editing.repeat === opt} onChange={() => setEditing({...editing, repeat: opt})} /> {labels[opt]}
-                  </label>
-                );
+                const labels = { none: "單次", weekly: "每週", biweekly: "每雙週", monthly: "每月" };
+                return <label key={opt} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}><input type="radio" checked={editing.repeat === opt} onChange={() => setEditing({...editing, repeat: opt})} /> {labels[opt]}</label>;
               })}
             </div>
             {editing.repeat !== "none" && (
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 13, color: "#475569" }}>自動產生接下來的</span>
-                <input type="number" min="2" max="24" style={{...S.i, width: 80, padding:"6px"}} value={editing.repeatCount || 6} onChange={e => setEditing({...editing, repeatCount: Number(e.target.value)})} />
-                <span style={{ fontSize: 13, color: "#475569" }}>期排程</span>
+                <span style={{ fontSize: 13, color: "#475569" }}>產生</span><input type="number" min="2" max="24" style={{...S.i, width: 80, padding:"6px"}} value={editing.repeatCount || 6} onChange={e => setEditing({...editing, repeatCount: Number(e.target.value)})} /><span style={{ fontSize: 13, color: "#475569" }}>期排程</span>
               </div>
             )}
           </div>
         )}
         
-        {editing.id && (
-          <div style={{ textAlign: "right", marginTop: 10, marginBottom: 10 }}>
-            <button onClick={() => { if(window.confirm("確定刪除此行程？")) { upd("tasks", p => p.filter(t => t.id !== editing.id)); addLog("刪除了行程"); setModals({}); } }} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:13 }}>🗑️ 刪除此行程</button>
-          </div>
-        )}
+        {editing.id && <div style={{ textAlign: "right", marginTop: 10, marginBottom: 10 }}><button onClick={() => { if(window.confirm("確定刪除此行程？")) { upd("tasks", p => p.filter(t => t.id !== editing.id)); addLog("刪除了行程"); setModals({}); } }} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:13 }}>🗑️ 刪除此行程</button></div>}
 
         <button onClick={() => {
           if (!editing.customerId || !editing.techId || (!editing.date && !editing.prefillDate)) return alert("日期、客戶與技師為必選");
           const baseDateStr = editing.date || editing.prefillDate;
-          
-          // 如果是編輯，或是單次新增
           if (editing.id || editing.repeat === "none" || !editing.repeat) {
              const newTask = { id: editing.id || uid(), date: baseDateStr, time: editing.time || "", customerId: editing.customerId, techId: editing.techId, serviceId: editing.serviceId || "mt", done: editing.done || false, report: editing.report || "", order: editing.order || Date.now() };
-             if(editing.id) upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, ...newTask } : t));
-             else upd("tasks", p => [...(p || []), newTask]);
+             if(editing.id) upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, ...newTask } : t)); else upd("tasks", p => [...(p || []), newTask]);
              addLog(`排定了 ${baseDateStr} 的行程`);
           } else {
-             // 產生循環排程
-             let generatedTasks = [];
-             let baseDate = new Date(baseDateStr);
-             let count = editing.repeatCount || 6;
+             let generatedTasks = []; let baseDate = new Date(baseDateStr); let count = editing.repeatCount || 6;
              for (let i = 0; i < count; i++) {
                 let d = new Date(baseDate);
                 if (editing.repeat === "weekly") d.setDate(d.getDate() + (i * 7));
                 if (editing.repeat === "biweekly") d.setDate(d.getDate() + (i * 14));
                 if (editing.repeat === "monthly") d.setMonth(d.getMonth() + i);
-                
                 generatedTasks.push({ id: uid(), date: d.toISOString().split("T")[0], time: editing.time || "", customerId: editing.customerId, techId: editing.techId, serviceId: editing.serviceId || "mt", done: false, report: "", order: Date.now() + i });
              }
-             upd("tasks", p => [...(p || []), ...generatedTasks]);
-             addLog(`自動產生了 ${count} 期循環排程`);
+             upd("tasks", p => [...(p || []), ...generatedTasks]); addLog(`自動產生了 ${count} 期循環排程`);
           }
-          setModals({});
-        }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>確認儲存排程</button>
+          setModals({}); setActiveTask(null);
+        }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>確認儲存</button>
       </Modal>
 
+      {/* 客戶表單 (已簡化文字) */}
       <Modal open={modals.custForm} onClose={() => setModals({})} title={editing.name ? "編輯客戶" : "新增客戶"}>
         <div style={S.f}><label style={S.l}>客戶名稱 (必填)</label><input style={S.i} value={editing.name || ""} onChange={e => setEditing({...editing, name: e.target.value})} /></div>
         <div style={S.f}><label style={S.l}>客戶編碼</label><input style={S.i} value={editing.code || ""} onChange={e => setEditing({...editing, code: e.target.value})} /></div>
-        <div style={S.f}><label style={S.l}>地址 (將支援地圖連結)</label><input style={S.i} value={editing.address || ""} onChange={e => setEditing({...editing, address: e.target.value})} /></div>
+        <div style={S.f}><label style={S.l}>地址</label><input style={S.i} value={editing.address || ""} onChange={e => setEditing({...editing, address: e.target.value})} /></div>
         <div style={{ display: "flex", gap:10, marginBottom:12 }}>
           <div style={{flex:1}}><label style={S.l}>聯絡人</label><input style={S.i} value={editing.contact || ""} onChange={e => setEditing({...editing, contact: e.target.value})} /></div>
-          <div style={{flex:1}}><label style={S.l}>電話 (支援 WhatsApp)</label><input style={S.i} value={editing.phone || ""} onChange={e => setEditing({...editing, phone: e.target.value})} /></div>
+          <div style={{flex:1}}><label style={S.l}>電話</label><input style={S.i} value={editing.phone || ""} onChange={e => setEditing({...editing, phone: e.target.value})} /></div>
         </div>
         <div style={S.f}><label style={S.l}>Email</label><input style={S.i} value={editing.email || ""} onChange={e => setEditing({...editing, email: e.target.value})} /></div>
         <div style={S.f}>
           <label style={{ fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontWeight:700, background:"#f1f5f9", padding:10, borderRadius:8 }}>
             <input type="checkbox" checked={editing.active !== false} onChange={e => setEditing({...editing, active: e.target.checked})} style={{transform:"scale(1.2)"}} /> 
-            {editing.active !== false ? "🟢 啟用此客戶" : "🔴 停用此客戶 (將從新增排程選單隱藏)"}
+            {editing.active !== false ? "🟢 啟用此客戶" : "🔴 停用此客戶"}
           </label>
         </div>
         <button onClick={() => {
-          if (!editing.name) return alert("請輸入客戶名稱");
+          if (!editing.name) return; // 移除alert，靜默防呆
           
-          // 停用防呆處置：檢查是否有未來的行程
           if (editing._prevActive !== false && editing.active === false) {
              const futureTasks = safeTasks.filter(t => t.customerId === editing.id && t.date >= td() && !t.done);
-             if (futureTasks.length > 0) {
-                if (window.confirm(`⚠️ 注意：該客戶被設為「停用」。\n系統偵測到他還有 ${futureTasks.length} 筆未來的排程尚未執行。\n\n▶ 按【確定】：一併刪除這些未來行程 (保留歷史)。\n▶ 按【取消】：僅停用客戶，保留原本的未來排程。`)) {
+             if (futureTasks.length > 0 && window.confirm(`⚠️ 此客戶還有 ${futureTasks.length} 筆未來的排程尚未執行。\n\n按【確定】一併刪除這些未來行程。\n按【取消】保留未來排程。`)) {
                    upd("tasks", p => p.filter(t => !(t.customerId === editing.id && t.date >= td() && !t.done)));
-                   addLog(`自動清除了停用客戶 [${editing.name}] 的未來排程`);
-                }
+                   addLog(`清除了停用客戶的未來排程`);
              }
           }
 
           const isExist = safeCusts.find(c => c && c.id === editing.id);
-          // 移除暫存變數
           const finalData = {...editing}; delete finalData._prevActive;
 
           if (isExist) upd("customers", p => p.map(c => c.id === editing.id ? finalData : c));
@@ -684,18 +679,10 @@ function MainApp() {
           
           addLog(`更新了客戶資料: ${editing.name}`);
           setModals({});
-        }} style={{ ...S.b("#10b981", "#fff"), width: "100%", padding: "12px" }}>儲存客戶資料</button>
+        }} style={{ ...S.b("#10b981", "#fff"), width: "100%", padding: "12px" }}>儲存資料</button>
       </Modal>
 
-      <Modal open={modals.report} onClose={() => setModals({})} title="填寫狀態備註">
-        <div style={S.f}><label style={S.l}>現場備註 / 處理狀況</label><textarea rows={5} style={S.i} value={editing.report || ""} onChange={e => setEditing({...editing, report: e.target.value})} placeholder="例如：已完成保養，建議下次更換馬達..." /></div>
-        <button onClick={() => {
-          upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, report: editing.report } : t));
-          addLog(`回報了行程備註`);
-          setModals({});
-        }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>送出備註</button>
-      </Modal>
-
+      {/* 技師管理 */}
       <Modal open={modals.tech} onClose={() => setModals({})} title="技師管理模組">
          <p style={{ fontSize: 13, color:"#64748b", marginBottom:15 }}>* 提示：按住技師區塊可上下拖曳調整顯示排序。</p>
          {safeTechs.map((t, idx) => {
@@ -714,18 +701,19 @@ function MainApp() {
               </div>
               <div style={{ display: "flex", gap: 20, background:"#f1f5f9", padding:"8px 12px", borderRadius:8 }}>
                 <label style={{ fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight:600 }}>
-                  <input type="checkbox" checked={t.isAdmin} onChange={e => { const n = [...safeTechs]; n[idx].isAdmin = e.target.checked; upd("technicians", n); }} /> 👑 設為管理員
+                  <input type="checkbox" checked={t.isAdmin} onChange={e => { const n = [...safeTechs]; n[idx].isAdmin = e.target.checked; upd("technicians", n); }} /> 👑 管理員
                 </label>
                 <label style={{ fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight:600, color: t.active ? "#22c55e" : "#ef4444" }}>
-                  <input type="checkbox" checked={t.active !== false} onChange={e => { const n = [...safeTechs]; n[idx].active = e.target.checked; upd("technicians", n); }} /> {t.active ? "🟢 帳號啟用中" : "🔴 帳號已停用"}
+                  <input type="checkbox" checked={t.active !== false} onChange={e => { const n = [...safeTechs]; n[idx].active = e.target.checked; upd("technicians", n); }} /> {t.active ? "🟢 啟用中" : "🔴 停用 (歷史紀錄保留)"}
                 </label>
               </div>
            </div>
          )})}
-         <button onClick={() => setModals({})} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding:"12px", marginTop:10 }}>儲存變更並關閉</button>
+         <button onClick={() => setModals({})} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding:"12px", marginTop:10 }}>完成</button>
       </Modal>
 
-      <Modal open={modals.logs} onClose={() => setModals({})} title="系統近期動態追蹤">
+      {/* 系統通知 */}
+      <Modal open={modals.logs} onClose={() => setModals({})} title="系統動態追蹤">
         <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 15 }}>
           <button onClick={() => { upd("logs", p => p.map(x => ({...x, read:true}))); }} style={{...S.b("none", "#64748b"), border:"1px solid #cbd5e1", padding:"6px 10px", fontSize:12}}>✔️ 全部標記為已讀</button>
         </div>
@@ -735,21 +723,22 @@ function MainApp() {
               <div style={{ color: "#94a3b8", whiteSpace:"nowrap", fontSize:12 }}>{l?.time || ""}</div>
               <div style={{ lineHeight:1.4 }}><b style={{color:"#0ea5e9"}}>{l?.user || "系統"}</b> {l?.msg || ""}</div>
             </div>
-          )) : <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontSize:15 }}>✅ 目前尚無任何新動態</div>}
+          )) : <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontSize:15 }}>✅ 尚無動態</div>}
         </div>
       </Modal>
 
-      <Modal open={modals.cfg} onClose={() => setModals({})} title="系統環境設定">
+      {/* 設定與備份還原 */}
+      <Modal open={modals.cfg} onClose={() => setModals({})} title="環境設定與備份">
          <div style={S.f}><label style={S.l}>系統名稱</label><input style={S.i} value={data.appName || ""} onChange={e => upd("appName", e.target.value)} /></div>
          <div style={S.f}><label style={S.l}>上傳公司 Logo</label><input type="file" accept="image/*" style={{...S.i, padding:"6px"}} onChange={e => { if (!e.target.files[0]) return; const r = new FileReader(); r.onload = ev => upd("logo", ev.target.result); r.readAsDataURL(e.target.files[0]); }} /></div>
          <hr style={{ border:"0", borderTop:"1px solid #e2e8f0", margin:"20px 0" }} />
          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-           <h4 style={{margin:0, color:"#0f172a"}}>備份與還原</h4>
+           <h4 style={{margin:0, color:"#0f172a"}}>備份與還原 (包含100%全系統資料)</h4>
            <button onClick={() => {
              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
              const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `AOT_Backup_${td()}.json`; a.click();
              addLog("下載了系統資料備份");
-           }} style={{ ...S.b("#10b981", "#fff"), width: "100%", padding:"12px" }}>💾 點擊下載完整 JSON 備份</button>
+           }} style={{ ...S.b("#10b981", "#fff"), width: "100%", padding:"12px" }}>💾 下載完整系統 JSON 備份</button>
 
            <label style={{ ...S.b("#ef4444", "#fff"), width: "100%", padding:"12px", textAlign:"center", cursor:"pointer", display:"block", boxSizing:"border-box" }}>
              ⚠️ 上傳還原備份檔 (將覆蓋現有資料)
@@ -770,7 +759,6 @@ class ErrorBoundary extends React.Component {
         <div style={{ padding: "40px", textAlign: "center", fontFamily: "sans-serif" }}>
           <h2 style={{ color: "#ef4444" }}>⚠️ 系統畫面發生錯誤</h2>
           <button onClick={() => window.location.reload()} style={{ padding: "10px 20px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "16px", margin: "20px 0" }}>🔄 重新載入系統</button>
-          <div style={{ background: "#f1f5f9", padding: "10px", borderRadius: "8px", color: "#334155", textAlign: "left", maxWidth: "800px", margin: "0 auto", overflowX: "auto" }}><code>{this.state.errorMsg}</code></div>
         </div>
       );
     }
