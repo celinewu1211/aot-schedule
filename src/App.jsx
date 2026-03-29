@@ -57,6 +57,18 @@ const monthOf = (b) => {
   return Array.from({ length: 42 }, (_, i) => { const cur = new Date(firstDay); cur.setDate(cur.getDate() + i); return cur.toISOString().split("T")[0]; });
 };
 
+// 嚴格日期計算 (解決時區與跨月Bug)
+const addDays = (dateStr, days) => {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+};
+const addMonths = (dateStr, months) => {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setMonth(d.getMonth() + months);
+  return d.toISOString().split("T")[0];
+};
+
 const S = {
   i: { width: "100%", padding: "10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box", fontFamily: "inherit" },
   l: { display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 4 },
@@ -79,7 +91,7 @@ function Modal({ open, onClose, title, children, width = 600 }) {
   );
 }
 
-// --- 登入模組 (修復 Lag 與 alert 問題) ---
+// --- 登入模組 ---
 function Login({ techs = [], adminPin, appName, logo, onLogin }) {
   const [acc, setAcc] = useState(""); 
   const [pin, setPin] = useState(""); 
@@ -146,7 +158,7 @@ function TaskCard({ t, view, isAdmin, session, safeCusts, safeTechs, safeService
   const toggleDone = () => {
       const isDone = !t.done;
       upd("tasks", p => p.map(x => x.id === t.id ? { ...x, done: isDone } : x));
-      addLog(`${isDone ? '✅ 完成了' : '🔄 重做/取消完成'} [${cust.name || "未知"}] 的行程`);
+      addLog(`${isDone ? '✅ 完成了' : '🔄 取消完成(Redo)'} [${cust.name || "未知"}] 的行程`);
   };
 
   const handleBlur = () => {
@@ -156,26 +168,23 @@ function TaskCard({ t, view, isAdmin, session, safeCusts, safeTechs, safeService
       }
   };
 
-  // 月視圖的小卡片
   if (view === "month") {
       return (
           <div draggable={isDraggable} onDragStart={() => { setDragType("TASK"); setDragItem(t); }} onDragEnter={() => { if(dragType==="TASK") setDragOverId(t.id); }}
                style={{ padding: "6px", borderRadius: 4, background: t.done ? "#f0fdf4" : "#fff", borderLeft: `4px solid ${t.done ? "#22c55e" : (tag?.color || "#3b82f6")}`, fontSize: 11, border: "1px solid #cbd5e1", opacity: dragOverId === t.id ? 0.4 : 1, cursor: "grab", marginBottom: 4 }}>
-              <div style={{fontWeight:700, textDecoration: t.done ? "line-through" : "none", color: t.done ? "#64748b" : "#0f172a"}}>{t.time ? t.time + " " : ""}{cust.name || "未知"}</div>
+              <div style={{fontWeight:700, textDecoration: t.done ? "line-through" : "none", color: t.done ? "#64748b" : "#0f172a"}}>{t.time ? `${t.time} ` : ""}{cust.name || "未知"}</div>
               {isAdmin && <div style={{color:"#64748b", marginTop:2}}>👷‍♂️ {tech.name}</div>}
           </div>
       );
   }
 
-  // 週視圖與放大日視圖的大卡片
   return (
       <div draggable={isDraggable} onDragStart={() => { setDragType("TASK"); setDragItem(t); }} onDragEnter={() => { if(dragType==="TASK") setDragOverId(t.id); }}
            style={{ padding: "12px", borderRadius: 8, background: t.done ? "#f0fdf4" : "#fff", border: `1px solid ${t.done ? "#bbf7d0" : "#cbd5e1"}`, borderLeft: `6px solid ${t.done ? "#22c55e" : (tag?.color || "#3b82f6")}`, cursor: "grab", opacity: dragOverId === t.id ? 0.4 : 1, marginBottom: 10, boxShadow: "0 2px 4px rgba(0,0,0,0.02)" }}>
           
-          {/* 標頭區 */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 900, color: "#0f172a", fontSize: 15 }}>{t.time || "待確認/全天"}</span>
+                  {t.time && <span style={{ fontWeight: 900, color: "#0f172a", fontSize: 15 }}>{t.time}</span>}
                   {tag && <span style={{fontSize:11, color:tag.color, background:tag.bg, padding:"2px 8px", borderRadius:12, fontWeight:700}}>{tag.label}</span>}
               </div>
               {isAdmin && (
@@ -186,14 +195,11 @@ function TaskCard({ t, view, isAdmin, session, safeCusts, safeTechs, safeService
               )}
           </div>
           
-          {/* 客戶名稱 */}
           <div style={{ color: "#0f172a", fontWeight:800, fontSize: 15, textDecoration: t.done ? "line-through" : "none", marginBottom: 8 }}>
               {cust.name || "未知客戶"} {cust.active === false && <span style={{color:"#ef4444", fontSize:11}}>(已停用)</span>}
           </div>
 
-          {/* 詳細資訊區 */}
           <div style={{ fontSize: 12, color: "#475569", background:"#f8fafc", padding:"10px", borderRadius:8, border:"1px solid #f1f5f9" }}>
-              {/* 地址與導航 */}
               {cust.address && (
                 <div style={{marginBottom:6, display:"flex", alignItems:"flex-start", gap:4}}>
                   <span>📍</span>
@@ -204,7 +210,6 @@ function TaskCard({ t, view, isAdmin, session, safeCusts, safeTechs, safeService
                 </div>
               )}
               
-              {/* 聯絡人區塊 (技師只能看現場) */}
               <div style={{display:"flex", flexDirection:"column", gap:6, marginTop:6}}>
                   {(!isAdmin || cust.siteContact || cust.sitePhone) && (
                       <div style={{display:"flex", flexWrap:"wrap", alignItems:"center", gap:6}}>
@@ -225,10 +230,9 @@ function TaskCard({ t, view, isAdmin, session, safeCusts, safeTechs, safeService
                       </div>
                   )}
               </div>
-              {cust.remarks && <div style={{marginTop:8, color:"#dc2626", fontWeight:600, background:"#fef2f2", padding:"4px 8px", borderRadius:4}}>⚠️ 客戶備註：{cust.remarks}</div>}
+              {cust.remarks && <div style={{marginTop:8, color:"#dc2626", fontWeight:600, background:"#fef2f2", padding:"4px 8px", borderRadius:4}}>⚠️ 備註：{cust.remarks}</div>}
           </div>
 
-          {/* 互動回報區 (免視窗直接輸入) */}
           {isMyTask && (
               <div style={{ marginTop: 12, borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 10, userSelect: "none" }}>
@@ -263,6 +267,7 @@ function MainApp() {
   const [searchCust, setSearchCust] = useState(""); 
   const [sortConfig, setSortConfig] = useState(null);
   const [selectedCusts, setSelectedCusts] = useState([]); 
+  const [broadcastMsg, setBroadcastMsg] = useState(""); // 廣播訊息
 
   const [dragType, setDragType] = useState(null);
   const [dragItem, setDragItem] = useState(null);
@@ -306,10 +311,12 @@ function MainApp() {
   });
   
   const addLog = (msg) => {
-    const newLog = { id: uid(), time: new Date().toLocaleString('zh-TW', {hour12:false}), msg, user: session.name, read: false };
+    const newLog = { id: uid(), time: new Date().toLocaleString('zh-TW', {hour12:false}), msg, user: session.name, readBy: [] };
     upd("logs", p => [newLog, ...(p || [])].slice(0, 50));
   };
-  const unreadLogs = safeLogs.filter(l => !l.read).length;
+  
+  // 計算「自己」未讀的數量
+  const unreadLogs = safeLogs.filter(l => !(l.readBy || []).includes(session.name)).length;
 
   const gridDates = viewMode === "week" ? weekOf(weekBase) : monthOf(weekBase);
   
@@ -354,7 +361,7 @@ function MainApp() {
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') direction = 'descending';
     setSortConfig({ key, direction });
     const sorted = [...safeCusts].sort((a, b) => {
-      let valA = a[key] || ""; let valB = b[key] || "";
+      let valA = String(a[key] || ""); let valB = String(b[key] || "");
       if (key === 'code') return direction === 'ascending' ? valA.localeCompare(valB, undefined, {numeric:true}) : valB.localeCompare(valA, undefined, {numeric:true});
       if (valA < valB) return direction === 'ascending' ? -1 : 1;
       if (valA > valB) return direction === 'ascending' ? 1 : -1;
@@ -384,16 +391,11 @@ function MainApp() {
         const res = Papa.parse(e.target.result, { header: true, skipEmptyLines: true });
         const mapped = res.data.map(r => ({
           id: uid(), active: true,
-          name: String(r["客戶名稱"] || "").trim(),
-          code: String(r["編碼"] || "").trim(),
-          address: String(r["地址"] || "").trim(),
-          contact: String(r["聯絡人"] || "").trim(),
-          phone: String(r["聯絡人電話"] || "").trim(),
-          siteContact: String(r["現場聯絡人"] || "").trim(),
-          sitePhone: String(r["現場聯絡人電話"] || "").trim(),
-          fax: String(r["Fax"] || "").trim(),
-          email: String(r["Email"] || "").trim(),
-          remarks: String(r["備註"] || "").trim(),
+          name: String(r["客戶名稱"] || "").trim(), code: String(r["編碼"] || "").trim(),
+          address: String(r["地址"] || "").trim(), contact: String(r["聯絡人"] || "").trim(),
+          phone: String(r["聯絡人電話"] || "").trim(), siteContact: String(r["現場聯絡人"] || "").trim(),
+          sitePhone: String(r["現場聯絡人電話"] || "").trim(), fax: String(r["Fax"] || "").trim(),
+          email: String(r["Email"] || "").trim(), remarks: String(r["備註"] || "").trim(),
         })).filter(c => c.name);
         
         const existSet = new Set(safeCusts.map(c => c ? String(c.name || "") + String(c.code || "") : ""));
@@ -422,11 +424,10 @@ function MainApp() {
           <b style={{ fontSize: 18, letterSpacing: 1 }}>{data.appName || "AOT排班系統"}</b>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {isAdmin && (
-            <button onClick={() => setModals({ logs: true })} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", cursor:"pointer", padding:"6px 12px", borderRadius:8 }}>
-              🔔 通知 {unreadLogs > 0 && <span style={{ background:"#ef4444", fontSize:10, padding:"2px 6px", borderRadius:10, marginLeft:4 }}>{unreadLogs}</span>}
-            </button>
-          )}
+          {/* 通知按鈕全體可見 */}
+          <button onClick={() => setModals({ logs: true })} style={{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", cursor:"pointer", padding:"6px 12px", borderRadius:8 }}>
+            🔔 通知 {unreadLogs > 0 && <span style={{ background:"#ef4444", fontSize:10, padding:"2px 6px", borderRadius:10, marginLeft:4 }}>{unreadLogs}</span>}
+          </button>
           {isAdmin && <button onClick={() => setModals({ tech: true })} style={S.b("rgba(255,255,255,0.15)")}>技師管理</button>}
           {isAdmin && <button onClick={() => setModals({ cfg: true })} style={S.b("rgba(255,255,255,0.15)")}>系統設定</button>}
           <button onClick={() => setSession(null)} style={S.b("rgba(0,0,0,0.2)")}>登出</button>
@@ -509,7 +510,7 @@ function MainApp() {
           </div>
         )}
 
-        {/* --- 介面：客戶 (嚴格依照11欄位) --- */}
+        {/* --- 介面：客戶 (11大欄位) --- */}
         {tab === "customers" && isAdmin && (
           <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -553,19 +554,19 @@ function MainApp() {
                             arr.splice(dragItem, 1); arr.splice(i, 0, temp);
                             upd("customers", arr); setDragType(null); setDragItem(null);
                           }}
-                          style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.6 : 1, cursor:"grab" }}>
-                        <td style={{ padding: "10px 12px", textAlign:"center" }}><input type="checkbox" checked={selectedCusts.includes(c.id)} onChange={() => toggleCustSelect(c.id)} style={{cursor:"pointer", transform:"scale(1.2)"}}/></td>
-                        <td style={{ padding: "10px 12px" }}>{c.active === false ? "🔴 停用" : "🟢 啟用"}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.code}</td>
-                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#0f172a" }}>{c.name}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.address}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.contact}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.phone}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.siteContact}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.sitePhone}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.fax}</td>
-                        <td style={{ padding: "10px 12px" }}>{c.email}</td>
-                        <td style={{ padding: "10px 12px", maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", color:"#64748b" }}>{c.remarks}</td>
+                          style={{ borderBottom: "1px solid #f1f5f9", background: c.active === false ? "#f8fafc" : "#fff", opacity: c.active === false ? 0.6 : 1 }}>
+                        <td style={{ padding: "10px 12px", textAlign:"center", cursor:"grab" }}><input type="checkbox" checked={selectedCusts.includes(c.id)} onChange={() => toggleCustSelect(c.id)} style={{cursor:"pointer", transform:"scale(1.2)"}}/></td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.active === false ? "🔴 停用" : "🟢 啟用"}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.code}</td>
+                        <td style={{ padding: "10px 12px", fontWeight: 700, color: "#0f172a", cursor:"grab" }}>{c.name}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.address}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.contact}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.phone}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.siteContact}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.sitePhone}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.fax}</td>
+                        <td style={{ padding: "10px 12px", cursor:"grab" }}>{c.email}</td>
+                        <td style={{ padding: "10px 12px", maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", color:"#64748b", cursor:"grab" }}>{c.remarks}</td>
                         <td style={{ padding: "10px 12px" }}>
                           <button onClick={() => { setEditing({...c, _prevActive: c.active}); setModals({ custForm: true }); }} style={{ color: "#0ea5e9", background: "rgba(14,165,233,0.1)", padding:"6px 12px", borderRadius:6, border: "none", cursor: "pointer", fontWeight:600 }}>編輯</button>
                         </td>
@@ -625,7 +626,9 @@ function MainApp() {
             </div>
             {editing.repeat !== "none" && (
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontSize: 13, color: "#475569" }}>產生</span><input type="number" min="2" max="24" style={{...S.i, width: 80, padding:"6px"}} value={editing.repeatCount || 6} onChange={e => setEditing({...editing, repeatCount: Number(e.target.value)})} /><span style={{ fontSize: 13, color: "#475569" }}>期</span>
+                <span style={{ fontSize: 13, color: "#475569" }}>產生</span>
+                <input type="text" inputMode="numeric" pattern="[0-9]*" style={{...S.i, width: 80, padding:"6px", textAlign:"center", fontSize:16, fontWeight:700}} value={editing.repeatCount || 6} onChange={e => setEditing({...editing, repeatCount: e.target.value.replace(/\D/g,'')})} />
+                <span style={{ fontSize: 13, color: "#475569" }}>期</span>
               </div>
             )}
           </div>
@@ -634,20 +637,20 @@ function MainApp() {
         {editing.id && <div style={{ textAlign: "right", marginTop: 10, marginBottom: 10 }}><button onClick={() => { if(window.confirm("確定刪除此行程？")) { upd("tasks", p => p.filter(t => t.id !== editing.id)); addLog("刪除了行程"); setModals({}); } }} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:13, fontWeight:700 }}>🗑️ 刪除此行程</button></div>}
 
         <button onClick={() => {
-          if (!editing.customerId || !editing.techId || (!editing.date && !editing.prefillDate)) return; // 靜默防呆
+          if (!editing.customerId || !editing.techId || (!editing.date && !editing.prefillDate)) return; 
           const baseDateStr = editing.date || editing.prefillDate;
           if (editing.id || editing.repeat === "none" || !editing.repeat) {
              const newTask = { id: editing.id || uid(), date: baseDateStr, time: editing.time || "", customerId: editing.customerId, techId: editing.techId, serviceId: editing.serviceId || "mt", done: editing.done || false, report: editing.report || "", order: editing.order || Date.now() };
              if(editing.id) upd("tasks", p => p.map(t => t.id === editing.id ? { ...t, ...newTask } : t)); else upd("tasks", p => [...(p || []), newTask]);
              addLog(`排定了 ${baseDateStr} 的行程`);
           } else {
-             let generatedTasks = []; let baseDate = new Date(baseDateStr); let count = editing.repeatCount || 6;
+             let generatedTasks = []; let count = Number(editing.repeatCount) || 6;
              for (let i = 0; i < count; i++) {
-                let d = new Date(baseDate);
-                if (editing.repeat === "weekly") d.setDate(d.getDate() + (i * 7));
-                if (editing.repeat === "biweekly") d.setDate(d.getDate() + (i * 14));
-                if (editing.repeat === "monthly") d.setMonth(d.getMonth() + i);
-                generatedTasks.push({ id: uid(), date: d.toISOString().split("T")[0], time: editing.time || "", customerId: editing.customerId, techId: editing.techId, serviceId: editing.serviceId || "mt", done: false, report: "", order: Date.now() + i });
+                let dStr = baseDateStr;
+                if (editing.repeat === "weekly") dStr = addDays(baseDateStr, i * 7);
+                if (editing.repeat === "biweekly") dStr = addDays(baseDateStr, i * 14);
+                if (editing.repeat === "monthly") dStr = addMonths(baseDateStr, i);
+                generatedTasks.push({ id: uid(), date: dStr, time: editing.time || "", customerId: editing.customerId, techId: editing.techId, serviceId: editing.serviceId || "mt", done: false, report: "", order: Date.now() + i });
              }
              upd("tasks", p => [...(p || []), ...generatedTasks]); addLog(`自動產生了 ${count} 期循環排程`);
           }
@@ -655,7 +658,7 @@ function MainApp() {
         }} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding: "12px" }}>確認儲存</button>
       </Modal>
 
-      {/* 👤 客戶表單 (已簡化文字) */}
+      {/* 👤 客戶表單 (11大欄位純淨版) */}
       <Modal open={modals.custForm} onClose={() => setModals({})} title={editing.name ? "編輯客戶" : "新增客戶"}>
         <div style={S.f}><label style={S.l}>客戶名稱 (必填)</label><input style={S.i} value={editing.name || ""} onChange={e => setEditing({...editing, name: e.target.value})} /></div>
         <div style={S.f}><label style={S.l}>編碼</label><input style={S.i} value={editing.code || ""} onChange={e => setEditing({...editing, code: e.target.value})} /></div>
@@ -732,18 +735,25 @@ function MainApp() {
          <button onClick={() => setModals({})} style={{ ...S.b("#0ea5e9", "#fff"), width: "100%", padding:"12px", marginTop:10 }}>完成</button>
       </Modal>
 
-      {/* 🔔 系統通知 */}
-      <Modal open={modals.logs} onClose={() => setModals({})} title="系統動態追蹤">
-        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 15 }}>
-          <button onClick={() => { upd("logs", p => p.map(x => ({...x, read:true}))); }} style={{...S.b("none", "#64748b"), border:"1px solid #cbd5e1", padding:"6px 10px", fontSize:12}}>✔️ 全部標記為已讀</button>
+      {/* 🔔 系統通知與廣播 */}
+      <Modal open={modals.logs} onClose={() => setModals({})} title="系統動態追蹤 & 廣播">
+        <div style={{ display:"flex", gap:10, marginBottom: 15 }}>
+          <input style={{...S.i, flex:1, padding:"8px 12px"}} value={broadcastMsg} onChange={e=>setBroadcastMsg(e.target.value)} placeholder="📢 輸入廣播留言給所有人..." />
+          <button onClick={() => { if(broadcastMsg) { addLog(`📢 廣播: ${broadcastMsg}`); setBroadcastMsg(""); } }} style={S.b("#0ea5e9", "#fff")}>發送</button>
         </div>
-        <div style={{ maxHeight: 400, overflowY: "auto", paddingRight: 5 }}>
-          {safeLogs.length > 0 ? safeLogs.map((l, i) => (
-            <div key={l?.id || i} style={{ padding: "14px 12px", borderBottom: "1px solid #e2e8f0", fontSize: 14, display:"flex", gap:10, background: l.read ? "#fff" : "#fff1f2", borderLeft: l.read ? "none" : "4px solid #ef4444" }}>
-              <div style={{ color: "#94a3b8", whiteSpace:"nowrap", fontSize:12 }}>{l?.time || ""}</div>
-              <div style={{ lineHeight:1.4 }}><b style={{color:"#0ea5e9"}}>{l?.user || "系統"}</b> {l?.msg || ""}</div>
-            </div>
-          )) : <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontSize:15 }}>✅ 尚無動態</div>}
+        <div style={{ display:"flex", justifyContent:"flex-end", marginBottom: 10 }}>
+          <button onClick={() => { upd("logs", p => p.map(x => ({...x, readBy: [...(x.readBy||[]), session.name]}))); }} style={{...S.b("none", "#64748b"), border:"1px solid #cbd5e1", padding:"6px 10px", fontSize:12}}>✔️ 將以下全部標記為已讀</button>
+        </div>
+        <div style={{ maxHeight: 350, overflowY: "auto", paddingRight: 5 }}>
+          {safeLogs.length > 0 ? safeLogs.map((l, i) => {
+            const isRead = (l.readBy || []).includes(session.name);
+            return (
+              <div key={l?.id || i} style={{ padding: "14px 12px", borderBottom: "1px solid #e2e8f0", fontSize: 14, display:"flex", gap:10, background: isRead ? "#fff" : "#fff1f2", borderLeft: isRead ? "none" : "4px solid #ef4444" }}>
+                <div style={{ color: "#94a3b8", whiteSpace:"nowrap", fontSize:12 }}>{l?.time || ""}</div>
+                <div style={{ lineHeight:1.4 }}><b style={{color:"#0ea5e9"}}>{l?.user || "系統"}</b> {l?.msg || ""}</div>
+              </div>
+            );
+          }) : <div style={{ textAlign:"center", padding:40, color:"#94a3b8", fontSize:15 }}>✅ 尚無動態</div>}
         </div>
       </Modal>
 
@@ -752,9 +762,20 @@ function MainApp() {
          <div style={S.f}><label style={S.l}>系統名稱</label><input style={S.i} value={data.appName || ""} onChange={e => upd("appName", e.target.value)} /></div>
          <div style={S.f}><label style={S.l}>上傳公司 Logo</label><input type="file" accept="image/*" style={{...S.i, padding:"6px"}} onChange={e => { if (!e.target.files[0]) return; const r = new FileReader(); r.onload = ev => upd("logo", ev.target.result); r.readAsDataURL(e.target.files[0]); }} /></div>
          <hr style={{ border:"0", borderTop:"1px solid #e2e8f0", margin:"20px 0" }} />
+         
+         <h4 style={{margin:"0 0 10px 0", color:"#0f172a"}}>🏷️ 服務類型標籤設定</h4>
+         {safeServices.map((s, idx) => (
+            <div key={s.id} style={{display:"flex", gap:10, marginBottom:8}}>
+              <input style={{...S.i, flex:1, padding:"6px 10px"}} value={s.label} onChange={e => { const ns=[...safeServices]; ns[idx].label=e.target.value; upd("serviceTypes", ns); }} />
+              <input type="color" value={s.color} onChange={e => { const ns=[...safeServices]; ns[idx].color=e.target.value; ns[idx].bg=e.target.value+"20"; upd("serviceTypes", ns); }} style={{height:34, width:50, padding:0, border:"none", cursor:"pointer"}} />
+              <button onClick={() => { if(window.confirm("確定刪除此標籤？")) upd("serviceTypes", p => p.filter(x => x.id !== s.id)); }} style={{background:"none", border:"none", color:"#ef4444", cursor:"pointer"}}>🗑️</button>
+            </div>
+         ))}
+         <button onClick={() => upd("serviceTypes", p => [...p, {id:uid(), label:"新標籤", color:"#64748b", bg:"#f1f5f9"}])} style={{...S.b("#f1f5f9", "#475569"), marginBottom:20, padding:"6px 12px"}}>+ 新增標籤</button>
+
+         <hr style={{ border:"0", borderTop:"1px solid #e2e8f0", margin:"0 0 20px 0" }} />
          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-           <h4 style={{margin:0, color:"#0f172a"}}>100% 完整備份與還原</h4>
-           <p style={{fontSize:12, color:"#64748b", margin:0}}>* 備份檔包含所有歷史排程、客戶清單、技師設定與通知紀錄。</p>
+           <h4 style={{margin:0, color:"#0f172a"}}>備份與還原 (包含100%全系統資料)</h4>
            <button onClick={() => {
              const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
              const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `AOT_Backup_${td()}.json`; a.click();
